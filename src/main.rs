@@ -36,6 +36,16 @@ const STYLE: &str = r#"
     --danger: #ff8f9c;
     --danger-bg: #26161d;
     --shadow: 0 24px 80px rgb(0 0 0 / 0.35);
+    --atom-bg: #282c34;
+    --atom-fg: #abb2bf;
+    --atom-comment: #5c6370;
+    --atom-red: #e06c75;
+    --atom-orange: #d19a66;
+    --atom-yellow: #e5c07b;
+    --atom-green: #98c379;
+    --atom-cyan: #56b6c2;
+    --atom-blue: #61afef;
+    --atom-purple: #c678dd;
     --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, Consolas, monospace;
     --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -228,9 +238,14 @@ body {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--editor);
+    background: var(--atom-bg);
 }
 
+.editor-wrap {
+    position: relative;
+}
+
+.editor-highlight,
 .editor,
 .output {
     width: 100%;
@@ -240,31 +255,98 @@ body {
     padding: 16px;
     border: 0;
     outline: 0;
-    background: var(--editor);
-    color: var(--text);
+    background: var(--atom-bg);
+    color: var(--atom-fg);
     font: 14px/1.55 var(--mono);
     tab-size: 4;
+    white-space: pre;
+}
+
+.editor-highlight,
+.editor {
+    position: absolute;
+    inset: 0;
+}
+
+.editor-highlight {
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
 }
 
 .editor {
+    z-index: 2;
     display: block;
     resize: none;
     overflow: auto;
+    background: transparent;
+    color: transparent;
     caret-color: var(--accent);
-    scrollbar-color: #3e5067 var(--editor);
+    scrollbar-color: #3e5067 var(--atom-bg);
+    -webkit-text-fill-color: transparent;
+}
+
+.editor::selection {
+    background: rgb(97 175 239 / 0.32);
+    color: transparent;
 }
 
 .output {
     display: block;
     overflow: auto;
     overscroll-behavior: contain;
-    white-space: pre;
-    scrollbar-color: #3e5067 var(--editor);
+    scrollbar-color: #3e5067 var(--atom-bg);
 }
 
 .output.error {
     background: var(--danger-bg);
     color: #ffd6d6;
+}
+
+.syntax-comment {
+    color: var(--atom-comment);
+    font-style: italic;
+}
+
+.syntax-keyword {
+    color: var(--atom-purple);
+}
+
+.syntax-type {
+    color: var(--atom-yellow);
+}
+
+.syntax-string {
+    color: var(--atom-green);
+}
+
+.syntax-number {
+    color: var(--atom-orange);
+}
+
+.syntax-symbol {
+    color: var(--atom-blue);
+}
+
+.syntax-local {
+    color: var(--atom-cyan);
+}
+
+.syntax-builtin,
+.syntax-error {
+    color: var(--atom-red);
+}
+
+.syntax-label {
+    color: var(--atom-yellow);
+}
+
+.syntax-operator {
+    color: var(--atom-cyan);
+}
+
+.syntax-punctuation {
+    color: var(--atom-fg);
 }
 
 @media (max-width: 840px) {
@@ -305,6 +387,7 @@ body {
 
 const CLIENT_JS: &str = r##"
 const source = document.querySelector("#source");
+const sourceHighlight = document.querySelector("#source-highlight");
 const output = document.querySelector("#output");
 const outputTitle = document.querySelector("#output-title");
 const outputMeta = document.querySelector("#output-meta");
@@ -315,9 +398,272 @@ const lineCount = document.querySelector("#line-count");
 let debounce = null;
 let requestId = 0;
 
+const htmlEscapes = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+};
+
+const niaKeywords = new Set([
+    "as", "break", "continue", "else", "enum", "extern", "false", "fn", "for", "if", "impl",
+    "let", "loop", "match", "mod", "move", "mut", "pub", "quant", "return", "struct", "true",
+    "use", "while",
+]);
+
+const niaTypes = new Set([
+    "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "ptr", "qubit",
+    "str", "String", "u8", "u16", "u32", "u64", "u128", "usize", "void",
+]);
+
+const niaBuiltins = new Set([
+    "drop", "len", "println", "spawn",
+]);
+
+const llvmInstructions = new Set([
+    "add", "addrspacecast", "alloca", "and", "ashr", "atomicrmw", "bitcast", "br", "call",
+    "catchret", "catchswitch", "cleanupret", "cmpxchg", "declare", "define", "extractelement",
+    "extractvalue", "fadd", "fcmp", "fdiv", "fence", "fmul", "fneg", "fpext", "fptosi",
+    "fptoui", "fptrunc", "freeze", "frem", "fsub", "getelementptr", "icmp", "indirectbr",
+    "insertelement", "insertvalue", "inttoptr", "invoke", "landingpad", "load", "lshr", "mul",
+    "or", "phi", "ptrtoint", "resume", "ret", "sdiv", "select", "sext", "shl", "shufflevector",
+    "sitofp", "srem", "store", "sub", "switch", "trunc", "udiv", "uitofp", "unreachable",
+    "urem", "va_arg", "xor", "zext",
+]);
+
+const llvmTypes = new Set([
+    "double", "float", "half", "label", "metadata", "ptr", "token", "void", "x86_fp80",
+]);
+
+const llvmAttrs = new Set([
+    "acq_rel", "acquire", "align", "alwaysinline", "attributes", "cold", "dso_local", "exact",
+    "fast", "global", "inbounds", "internal", "local_unnamed_addr", "monotonic", "noundef",
+    "nounwind", "nsw", "nuw", "private", "release", "seq_cst", "source_filename", "target",
+    "unnamed_addr", "weak",
+]);
+
 function updateLineCount() {
     const lines = source.value.length === 0 ? 1 : source.value.split("\n").length;
     lineCount.textContent = `${lines} lines`;
+}
+
+function escapeHtml(value) {
+    return value.replace(/[&<>"']/g, (ch) => htmlEscapes[ch]);
+}
+
+function token(className, value) {
+    return `<span class="${className}">${escapeHtml(value)}</span>`;
+}
+
+function finishHighlight(sourceText, html) {
+    if (html.length === 0) {
+        return " ";
+    }
+    return sourceText.endsWith("\n") ? `${html} ` : html;
+}
+
+function isIdentStart(ch) {
+    return /[A-Za-z_]/.test(ch);
+}
+
+function isIdent(ch) {
+    return /[A-Za-z0-9_]/.test(ch);
+}
+
+function isLlvmIdentStart(ch) {
+    return /[A-Za-z_.$]/.test(ch);
+}
+
+function isLlvmIdent(ch) {
+    return /[A-Za-z0-9_.$-]/.test(ch);
+}
+
+function readQuoted(line, quoteIndex, quoteChar) {
+    let index = quoteIndex + 1;
+    let escaped = false;
+    while (index < line.length) {
+        const ch = line[index];
+        index += 1;
+        if (escaped) {
+            escaped = false;
+        } else if (ch === "\\") {
+            escaped = true;
+        } else if (ch === quoteChar) {
+            break;
+        }
+    }
+    return index;
+}
+
+function highlightNiaLine(line) {
+    let html = "";
+    let index = 0;
+
+    while (index < line.length) {
+        if (line.startsWith("//", index)) {
+            html += token("syntax-comment", line.slice(index));
+            break;
+        }
+
+        const ch = line[index];
+        if (ch === "\"") {
+            const end = readQuoted(line, index, "\"");
+            html += token("syntax-string", line.slice(index, end));
+            index = end;
+            continue;
+        }
+
+        if (ch === "'") {
+            const end = readQuoted(line, index, "'");
+            html += token("syntax-string", line.slice(index, end));
+            index = end;
+            continue;
+        }
+
+        const number = line.slice(index).match(/^-?(?:0x[0-9a-fA-F_]+|\d[\d_]*(?:\.\d[\d_]*)?)/);
+        if (number) {
+            html += token("syntax-number", number[0]);
+            index += number[0].length;
+            continue;
+        }
+
+        if (isIdentStart(ch)) {
+            let end = index + 1;
+            while (end < line.length && isIdent(line[end])) {
+                end += 1;
+            }
+            const word = line.slice(index, end);
+            if (niaKeywords.has(word)) {
+                html += token("syntax-keyword", word);
+            } else if (niaTypes.has(word)) {
+                html += token("syntax-type", word);
+            } else if (niaBuiltins.has(word)) {
+                html += token("syntax-builtin", word);
+            } else {
+                html += escapeHtml(word);
+            }
+            index = end;
+            continue;
+        }
+
+        if ("+-*/%=!<>&|^~:?".includes(ch)) {
+            html += token("syntax-operator", ch);
+        } else if ("(){}[];,.@".includes(ch)) {
+            html += token("syntax-punctuation", ch);
+        } else {
+            html += escapeHtml(ch);
+        }
+        index += 1;
+    }
+
+    return html;
+}
+
+function highlightNia(text) {
+    return finishHighlight(text, text.split("\n").map(highlightNiaLine).join("\n"));
+}
+
+function highlightLlvmLine(line) {
+    let html = "";
+    let index = 0;
+
+    while (index < line.length) {
+        const ch = line[index];
+        if (ch === ";") {
+            html += token("syntax-comment", line.slice(index));
+            break;
+        }
+
+        if (ch === "\"" || (ch === "c" && line[index + 1] === "\"")) {
+            const quoteIndex = ch === "c" ? index + 1 : index;
+            const end = readQuoted(line, quoteIndex, "\"");
+            html += token("syntax-string", line.slice(index, end));
+            index = end;
+            continue;
+        }
+
+        if (ch === "@" || ch === "%" || ch === "!" || ch === "#") {
+            let end = index + 1;
+            while (end < line.length && isLlvmIdent(line[end])) {
+                end += 1;
+            }
+            const className = ch === "%" ? "syntax-local" : "syntax-symbol";
+            html += token(className, line.slice(index, end));
+            index = end;
+            continue;
+        }
+
+        const number = line.slice(index).match(/^-?(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)/i);
+        if (number) {
+            html += token("syntax-number", number[0]);
+            index += number[0].length;
+            continue;
+        }
+
+        if (isLlvmIdentStart(ch)) {
+            let end = index + 1;
+            while (end < line.length && isLlvmIdent(line[end])) {
+                end += 1;
+            }
+            const word = line.slice(index, end);
+            if (line[end] === ":") {
+                html += token("syntax-label", `${word}:`);
+                index = end + 1;
+                continue;
+            }
+            if (llvmInstructions.has(word)) {
+                html += token("syntax-keyword", word);
+            } else if (llvmTypes.has(word) || /^i\d+$/.test(word) || /^v\d+i\d+$/.test(word)) {
+                html += token("syntax-type", word);
+            } else if (llvmAttrs.has(word)) {
+                html += token("syntax-builtin", word);
+            } else if (word === "false" || word === "null" || word === "poison" || word === "true" || word === "undef" || word === "zeroinitializer") {
+                html += token("syntax-number", word);
+            } else {
+                html += escapeHtml(word);
+            }
+            index = end;
+            continue;
+        }
+
+        if ("+-*/%=!<>&|^~:?".includes(ch)) {
+            html += token("syntax-operator", ch);
+        } else if ("(){}[];,.x".includes(ch)) {
+            html += token("syntax-punctuation", ch);
+        } else {
+            html += escapeHtml(ch);
+        }
+        index += 1;
+    }
+
+    return html;
+}
+
+function highlightLlvm(text) {
+    return finishHighlight(text, text.split("\n").map(highlightLlvmLine).join("\n"));
+}
+
+function highlightDiagnostic(text) {
+    const highlighted = escapeHtml(text).replace(
+        /(type error|parse error|semantic error|backend error|lex error|error|failed|panic)/gi,
+        '<span class="syntax-error">$1</span>',
+    );
+    return finishHighlight(text, highlighted);
+}
+
+function syncSourceHighlight() {
+    sourceHighlight.scrollTop = source.scrollTop;
+    sourceHighlight.scrollLeft = source.scrollLeft;
+}
+
+function renderSourceHighlight() {
+    sourceHighlight.innerHTML = highlightNia(source.value);
+    syncSourceHighlight();
+}
+
+function renderOutputHighlight(text, mode) {
+    output.innerHTML = mode === "diagnostic" ? highlightDiagnostic(text) : highlightLlvm(text);
 }
 
 async function compileNow() {
@@ -339,15 +685,16 @@ async function compileNow() {
             return;
         }
 
-        output.textContent = payload.output;
         outputTitle.textContent = quantEnabled ? "QIR" : "LLVM IR";
         outputMeta.textContent = quantEnabled ? "quant .ll" : ".ll";
         if (payload.status === "ok") {
             output.className = "output";
+            renderOutputHighlight(payload.output, "llvm");
             statusLine.textContent = quantEnabled ? "QIR ready" : "Compiled";
             statusLine.className = "status ok";
         } else {
             output.className = "output error";
+            renderOutputHighlight(payload.output, "diagnostic");
             statusLine.textContent = "Error";
             statusLine.className = "status error";
         }
@@ -356,8 +703,8 @@ async function compileNow() {
             return;
         }
 
-        output.textContent = `request failed: ${error}`;
         output.className = "output error";
+        renderOutputHighlight(`request failed: ${error}`, "diagnostic");
         statusLine.textContent = "Request failed";
         statusLine.className = "status error";
     } finally {
@@ -369,6 +716,7 @@ async function compileNow() {
 
 function scheduleCompile() {
     clearTimeout(debounce);
+    renderSourceHighlight();
     updateLineCount();
     statusLine.textContent = "Edited";
     statusLine.className = "status";
@@ -376,6 +724,7 @@ function scheduleCompile() {
 }
 
 source.addEventListener("input", scheduleCompile);
+source.addEventListener("scroll", syncSourceHighlight);
 quant.addEventListener("change", compileNow);
 compileButton.addEventListener("click", compileNow);
 source.addEventListener("keydown", (event) => {
@@ -390,6 +739,8 @@ source.addEventListener("keydown", (event) => {
     source.selectionStart = source.selectionEnd = start + 4;
     scheduleCompile();
 });
+renderSourceHighlight();
+renderOutputHighlight(output.textContent, output.classList.contains("error") ? "diagnostic" : "llvm");
 updateLineCount();
 "##;
 
@@ -529,12 +880,14 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                         <span id="line-count" class="pane-meta">{line_count} " lines"</span>
                     </div>
                     <div class="editor-wrap">
+                        <pre id="source-highlight" class="editor-highlight" aria-hidden="true"></pre>
                         <textarea
                             id="source"
                             class="editor"
                             spellcheck="false"
                             autocomplete="off"
                             autocapitalize="off"
+                            wrap="off"
                         >{source}</textarea>
                     </div>
                 </section>
