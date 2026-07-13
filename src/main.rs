@@ -6,7 +6,7 @@ use axum::extract::Json;
 use axum::response::Html;
 use axum::routing::{get, post};
 use leptos::prelude::*;
-use nialang::driver::pipeline::compile_to_ll;
+use nialang::driver::pipeline::{Backend, compile_to_ll_with};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_SOURCE: &str = r#"fn main() i32 {
@@ -19,16 +19,23 @@ const DEFAULT_SOURCE: &str = r#"fn main() i32 {
 const STYLE: &str = r#"
 :root {
     color-scheme: dark;
-    --bg: #101214;
-    --panel: #181b1f;
-    --panel-strong: #20242a;
-    --border: #333941;
-    --text: #f4f6f8;
-    --muted: #9aa4af;
-    --accent: #6ee7b7;
-    --accent-strong: #34d399;
-    --danger: #ff8a8a;
-    --danger-bg: #2b1719;
+    --bg: #0c0f14;
+    --topbar: #111720;
+    --panel: #151a22;
+    --panel-strong: #1b2330;
+    --editor: #0f141b;
+    --border: #2b3544;
+    --border-soft: #202936;
+    --text: #f5f7fb;
+    --muted: #9aa8ba;
+    --muted-strong: #c4ccd8;
+    --accent: #55d6be;
+    --accent-strong: #7dd3fc;
+    --accent-ink: #031317;
+    --warning: #f9c76b;
+    --danger: #ff8f9c;
+    --danger-bg: #26161d;
+    --shadow: 0 24px 80px rgb(0 0 0 / 0.35);
     --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, Consolas, monospace;
     --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -39,8 +46,9 @@ const STYLE: &str = r#"
 
 html,
 body {
-    min-height: 100%;
+    height: 100%;
     margin: 0;
+    overflow: hidden;
 }
 
 body {
@@ -52,7 +60,11 @@ body {
 .app {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+    background:
+        linear-gradient(180deg, #121821 0%, #0c0f14 34%),
+        var(--bg);
 }
 
 .topbar {
@@ -60,37 +72,41 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    min-height: 58px;
-    padding: 0 18px;
+    min-height: 64px;
+    padding: 0 20px;
     border-bottom: 1px solid var(--border);
-    background: #13161a;
+    background: color-mix(in srgb, var(--topbar) 94%, white 6%);
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset;
 }
 
 .brand {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     min-width: 0;
     font-weight: 700;
+    letter-spacing: 0;
 }
 
 .brand-mark {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
-    border: 1px solid #4b5563;
-    background: #20242a;
+    width: 34px;
+    height: 34px;
+    border: 1px solid #3a6570;
+    border-radius: 8px;
+    background: linear-gradient(145deg, #1d3340, #14212b);
     color: var(--accent);
     font-family: var(--mono);
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
 }
 
 .toolbar {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     min-width: 0;
 }
 
@@ -108,15 +124,45 @@ body {
     color: var(--danger);
 }
 
+.quant-toggle {
+    display: inline-grid;
+    grid-template-columns: 18px auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #151c26;
+    color: var(--muted-strong);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    user-select: none;
+}
+
+.quant-toggle:focus-within {
+    border-color: var(--accent-strong);
+    box-shadow: 0 0 0 3px rgb(125 211 252 / 0.14);
+}
+
+.quant-checkbox {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+}
+
 .compile-button {
     min-height: 34px;
-    padding: 0 14px;
-    border: 1px solid #48cfa4;
-    border-radius: 6px;
-    background: var(--accent-strong);
-    color: #071411;
+    padding: 0 16px;
+    border: 1px solid #8debd4;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #8fead7, #55d6be);
+    color: var(--accent-ink);
     font: 700 14px var(--sans);
     cursor: pointer;
+    box-shadow: 0 10px 28px rgb(85 214 190 / 0.16);
 }
 
 .compile-button:disabled {
@@ -126,8 +172,11 @@ body {
 
 .workspace {
     display: grid;
-    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+    grid-template-columns: minmax(320px, 0.95fr) minmax(340px, 1.05fr);
+    gap: 14px;
     min-height: 0;
+    padding: 14px;
+    overflow: hidden;
 }
 
 .pane {
@@ -135,12 +184,15 @@ body {
     grid-template-rows: auto minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
-    border-right: 1px solid var(--border);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
     background: var(--panel);
+    box-shadow: var(--shadow);
 }
 
-.pane:last-child {
-    border-right: 0;
+.pane.output-pane {
+    border-color: #314055;
 }
 
 .pane-header {
@@ -148,8 +200,8 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    min-height: 42px;
-    padding: 0 14px;
+    min-height: 44px;
+    padding: 0 16px;
     border-bottom: 1px solid var(--border);
     background: var(--panel-strong);
 }
@@ -157,8 +209,10 @@ body {
 .pane-title {
     overflow: hidden;
     color: #d9dee5;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -167,6 +221,14 @@ body {
     color: var(--muted);
     font: 12px var(--mono);
     white-space: nowrap;
+}
+
+.editor-wrap,
+.output-wrap {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--editor);
 }
 
 .editor,
@@ -178,20 +240,26 @@ body {
     padding: 16px;
     border: 0;
     outline: 0;
-    resize: none;
-    background: #111418;
+    background: var(--editor);
     color: var(--text);
     font: 14px/1.55 var(--mono);
     tab-size: 4;
 }
 
 .editor {
+    display: block;
+    resize: none;
+    overflow: auto;
     caret-color: var(--accent);
+    scrollbar-color: #3e5067 var(--editor);
 }
 
 .output {
+    display: block;
     overflow: auto;
+    overscroll-behavior: contain;
     white-space: pre;
+    scrollbar-color: #3e5067 var(--editor);
 }
 
 .output.error {
@@ -200,6 +268,17 @@ body {
 }
 
 @media (max-width: 840px) {
+    html,
+    body {
+        overflow: auto;
+    }
+
+    .app {
+        min-height: 100vh;
+        height: auto;
+        overflow: visible;
+    }
+
     .topbar {
         align-items: stretch;
         flex-direction: column;
@@ -207,22 +286,19 @@ body {
     }
 
     .toolbar {
-        justify-content: space-between;
+        flex-wrap: wrap;
+        justify-content: flex-start;
         width: 100%;
     }
 
     .workspace {
         grid-template-columns: 1fr;
-        grid-template-rows: minmax(360px, 1fr) minmax(360px, 1fr);
+        grid-template-rows: minmax(360px, 44vh) minmax(360px, 44vh);
+        padding: 10px;
     }
 
     .pane {
-        border-right: 0;
-        border-bottom: 1px solid var(--border);
-    }
-
-    .pane:last-child {
-        border-bottom: 0;
+        box-shadow: none;
     }
 }
 "#;
@@ -230,8 +306,11 @@ body {
 const CLIENT_JS: &str = r##"
 const source = document.querySelector("#source");
 const output = document.querySelector("#output");
+const outputTitle = document.querySelector("#output-title");
+const outputMeta = document.querySelector("#output-meta");
 const statusLine = document.querySelector("#status");
 const compileButton = document.querySelector("#compile");
+const quant = document.querySelector("#quant");
 const lineCount = document.querySelector("#line-count");
 let debounce = null;
 let requestId = 0;
@@ -248,10 +327,11 @@ async function compileNow() {
     statusLine.className = "status";
 
     try {
+        const quantEnabled = quant.checked;
         const response = await fetch("/api/compile", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ source: source.value }),
+            body: JSON.stringify({ source: source.value, quant: quantEnabled }),
         });
 
         const payload = await response.json();
@@ -260,9 +340,11 @@ async function compileNow() {
         }
 
         output.textContent = payload.output;
+        outputTitle.textContent = quantEnabled ? "QIR" : "LLVM IR";
+        outputMeta.textContent = quantEnabled ? "quant .ll" : ".ll";
         if (payload.status === "ok") {
             output.className = "output";
-            statusLine.textContent = "Compiled";
+            statusLine.textContent = quantEnabled ? "QIR ready" : "Compiled";
             statusLine.className = "status ok";
         } else {
             output.className = "output error";
@@ -294,6 +376,7 @@ function scheduleCompile() {
 }
 
 source.addEventListener("input", scheduleCompile);
+quant.addEventListener("change", compileNow);
 compileButton.addEventListener("click", compileNow);
 source.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") {
@@ -313,6 +396,7 @@ updateLineCount();
 #[derive(Deserialize)]
 struct CompileRequest {
     source: String,
+    quant: bool,
 }
 
 #[derive(Serialize)]
@@ -347,7 +431,8 @@ async fn index() -> Html<String> {
 
 async fn compile(Json(payload): Json<CompileRequest>) -> Json<CompileResponse> {
     let source = payload.source;
-    let result = tokio::task::spawn_blocking(move || compile_source(&source))
+    let quant = payload.quant;
+    let result = tokio::task::spawn_blocking(move || compile_source(&source, quant))
         .await
         .unwrap_or_else(|err| CompileResponse {
             status: "error",
@@ -357,7 +442,7 @@ async fn compile(Json(payload): Json<CompileRequest>) -> Json<CompileResponse> {
     Json(result)
 }
 
-fn compile_source(source: &str) -> CompileResponse {
+fn compile_source(source: &str, quant: bool) -> CompileResponse {
     if source.trim().is_empty() {
         return CompileResponse {
             status: "error",
@@ -365,7 +450,12 @@ fn compile_source(source: &str) -> CompileResponse {
         };
     }
 
-    match compile_to_ll(source) {
+    let backend = if quant {
+        Backend::Qir
+    } else {
+        Backend::Default
+    };
+    match compile_to_ll_with(source, backend) {
         Ok(output) => CompileResponse {
             status: "ok",
             output,
@@ -378,7 +468,7 @@ fn compile_source(source: &str) -> CompileResponse {
 }
 
 fn render_page(source: &str) -> String {
-    let initial = compile_source(source);
+    let initial = compile_source(source, false);
     let app = view! {
         <AppView
             source=source.to_string()
@@ -425,6 +515,10 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                 </div>
                 <div class="toolbar">
                     <span id="status" class=status_class>{status_text}</span>
+                    <label class="quant-toggle" for="quant">
+                        <input id="quant" class="quant-checkbox" type="checkbox" />
+                        <span>"Quant"</span>
+                    </label>
                     <button id="compile" class="compile-button" type="button">"Compile"</button>
                 </div>
             </header>
@@ -434,20 +528,24 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                         <span class="pane-title">"Nia source"</span>
                         <span id="line-count" class="pane-meta">{line_count} " lines"</span>
                     </div>
-                    <textarea
-                        id="source"
-                        class="editor"
-                        spellcheck="false"
-                        autocomplete="off"
-                        autocapitalize="off"
-                    >{source}</textarea>
-                </section>
-                <section class="pane">
-                    <div class="pane-header">
-                        <span class="pane-title">"LLVM IR"</span>
-                        <span class="pane-meta">".ll"</span>
+                    <div class="editor-wrap">
+                        <textarea
+                            id="source"
+                            class="editor"
+                            spellcheck="false"
+                            autocomplete="off"
+                            autocapitalize="off"
+                        >{source}</textarea>
                     </div>
-                    <pre id="output" class=output_class>{output}</pre>
+                </section>
+                <section class="pane output-pane">
+                    <div class="pane-header">
+                        <span id="output-title" class="pane-title">"LLVM IR"</span>
+                        <span id="output-meta" class="pane-meta">".ll"</span>
+                    </div>
+                    <div class="output-wrap">
+                        <pre id="output" class=output_class>{output}</pre>
+                    </div>
                 </section>
             </section>
         </main>
@@ -460,7 +558,7 @@ mod tests {
 
     #[test]
     fn compile_source_returns_llvm_ir_for_valid_program() {
-        let response = compile_source(DEFAULT_SOURCE);
+        let response = compile_source(DEFAULT_SOURCE, false);
 
         assert_eq!(response.status, "ok");
         assert!(
@@ -472,7 +570,7 @@ mod tests {
 
     #[test]
     fn compile_source_returns_error_for_invalid_program() {
-        let response = compile_source("fn main() i32 { true }");
+        let response = compile_source("fn main() i32 { true }", false);
 
         assert_eq!(response.status, "error");
         assert!(
@@ -488,6 +586,19 @@ mod tests {
 
         assert!(page.contains("id=\"source\""), "{page}");
         assert!(page.contains("id=\"output\""), "{page}");
+        assert!(page.contains("id=\"quant\""), "{page}");
         assert!(page.contains("LLVM IR"), "{page}");
+    }
+
+    #[test]
+    fn compile_source_can_emit_qir_view() {
+        let response = compile_source(DEFAULT_SOURCE, true);
+
+        assert_eq!(response.status, "ok");
+        assert!(
+            response.output.contains("generated by nialang"),
+            "{}",
+            response.output
+        );
     }
 }
