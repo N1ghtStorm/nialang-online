@@ -449,6 +449,7 @@ const lineCount = document.querySelector("#line-count");
 let debounce = null;
 let requestId = 0;
 let runRequestId = 0;
+let runInFlight = false;
 
 const htmlEscapes = {
     "&": "&amp;",
@@ -726,6 +727,10 @@ function renderRunHighlight(text, mode) {
     renderHighlighted(runOutput, text, mode);
 }
 
+function updateRunButtonState() {
+    runButton.disabled = !quant.checked || runInFlight;
+}
+
 async function compileNow() {
     const currentRequest = ++requestId;
     compileButton.disabled = true;
@@ -775,9 +780,14 @@ async function compileNow() {
 }
 
 async function runQuantNow() {
+    if (!quant.checked) {
+        updateRunButtonState();
+        return;
+    }
+
     const currentRequest = ++runRequestId;
-    quant.checked = true;
-    runButton.disabled = true;
+    runInFlight = true;
+    updateRunButtonState();
     runStatus.textContent = "Running";
     runStatus.className = "pane-meta";
 
@@ -812,7 +822,8 @@ async function runQuantNow() {
         runStatus.textContent = "Request failed";
     } finally {
         if (currentRequest === runRequestId) {
-            runButton.disabled = false;
+            runInFlight = false;
+            updateRunButtonState();
         }
     }
 }
@@ -829,9 +840,17 @@ function scheduleCompile() {
 
 source.addEventListener("input", scheduleCompile);
 source.addEventListener("scroll", syncSourceHighlight);
-quant.addEventListener("change", compileNow);
+quant.addEventListener("change", () => {
+    updateRunButtonState();
+    compileNow();
+});
 compileButton.addEventListener("click", compileNow);
 runButton.addEventListener("click", () => {
+    if (!quant.checked) {
+        updateRunButtonState();
+        return;
+    }
+
     compileNow();
     runQuantNow();
 });
@@ -850,6 +869,7 @@ source.addEventListener("keydown", (event) => {
 renderSourceHighlight();
 renderOutputHighlight(output.textContent, output.classList.contains("error") ? "diagnostic" : "llvm");
 renderRunHighlight(runOutput.textContent, runOutput.classList.contains("error") ? "diagnostic" : "llvm");
+updateRunButtonState();
 updateLineCount();
 "##;
 
@@ -1022,7 +1042,7 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                         <span>"Quant"</span>
                     </label>
                     <button id="compile" class="compile-button" type="button">"Compile"</button>
-                    <button id="run-quant" class="run-button" type="button">"Run Quant"</button>
+                    <button id="run-quant" class="run-button" type="button" disabled=true>"Run"</button>
                 </div>
             </header>
             <section class="workspace">
@@ -1059,7 +1079,7 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                             <span id="run-status" class="pane-meta">"Idle"</span>
                         </div>
                         <div class="output-wrap">
-                            <pre id="run-output" class="output run-output">"Click Run Quant to execute the QIR program."</pre>
+                            <pre id="run-output" class="output run-output">"Enable Quant, then click Run to execute the QIR program."</pre>
                         </div>
                     </section>
                 </div>
