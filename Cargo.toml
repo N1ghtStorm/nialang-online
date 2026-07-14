@@ -6,6 +6,6 @@ edition = "2024"
 [dependencies]
 axum = "0.8.9"
 leptos = { version = "0.8.20", features = ["ssr"] }
-nialang = { path = "../nialang" }
+nialang = { path = "../nialang", features = ["qir-runner"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "net"] }

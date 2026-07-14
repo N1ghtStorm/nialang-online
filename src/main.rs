@@ -6,7 +6,7 @@ use axum::extract::Json;
 use axum::response::Html;
 use axum::routing::{get, post};
 use leptos::prelude::*;
-use nialang::driver::pipeline::{Backend, compile_to_ll_with};
+use nialang::driver::pipeline::{Backend, compile_to_ll_with, run_qir_ll_to_string};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_SOURCE: &str = r#"fn main() i32 {
@@ -15,6 +15,20 @@ const DEFAULT_SOURCE: &str = r#"fn main() i32 {
     a + b
 }
 "#;
+
+#[cfg(test)]
+const DEFAULT_QUANT_SOURCE: &str = r#"fn main() i32 {
+    quant {
+        let q = qubit();
+        let r = q_measure(q);
+        q_record(r);
+    }
+    0
+}
+"#;
+
+#[cfg(test)]
+const QFT4_SOURCE: &str = include_str!("../../nialang/examples/quantum/qft4.nia");
 
 const STYLE: &str = r#"
 :root {
@@ -175,7 +189,20 @@ body {
     box-shadow: 0 10px 28px rgb(85 214 190 / 0.16);
 }
 
-.compile-button:disabled {
+.run-button {
+    min-height: 34px;
+    padding: 0 16px;
+    border: 1px solid #f4d28a;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #f6d98f, #e5b85e);
+    color: #1b1204;
+    font: 700 14px var(--sans);
+    cursor: pointer;
+    box-shadow: 0 10px 28px rgb(229 184 94 / 0.14);
+}
+
+.compile-button:disabled,
+.run-button:disabled {
     cursor: wait;
     opacity: 0.7;
 }
@@ -203,6 +230,19 @@ body {
 
 .pane.output-pane {
     border-color: #314055;
+}
+
+.right-stack {
+    display: grid;
+    grid-template-rows: minmax(0, 1.35fr) minmax(220px, 0.65fr);
+    gap: 14px;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.pane.run-pane {
+    border-color: #3d3449;
 }
 
 .pane-header {
@@ -303,6 +343,10 @@ body {
     color: #ffd6d6;
 }
 
+.run-output {
+    color: var(--atom-green);
+}
+
 .syntax-comment {
     color: var(--atom-comment);
     font-style: italic;
@@ -375,8 +419,12 @@ body {
 
     .workspace {
         grid-template-columns: 1fr;
-        grid-template-rows: minmax(360px, 44vh) minmax(360px, 44vh);
+        grid-template-rows: minmax(360px, 40vh) minmax(520px, 58vh);
         padding: 10px;
+    }
+
+    .right-stack {
+        grid-template-rows: minmax(300px, 1fr) minmax(220px, 0.75fr);
     }
 
     .pane {
@@ -391,12 +439,16 @@ const sourceHighlight = document.querySelector("#source-highlight");
 const output = document.querySelector("#output");
 const outputTitle = document.querySelector("#output-title");
 const outputMeta = document.querySelector("#output-meta");
+const runOutput = document.querySelector("#run-output");
+const runStatus = document.querySelector("#run-status");
 const statusLine = document.querySelector("#status");
 const compileButton = document.querySelector("#compile");
+const runButton = document.querySelector("#run-quant");
 const quant = document.querySelector("#quant");
 const lineCount = document.querySelector("#line-count");
 let debounce = null;
 let requestId = 0;
+let runRequestId = 0;
 
 const htmlEscapes = {
     "&": "&amp;",
@@ -662,8 +714,16 @@ function renderSourceHighlight() {
     syncSourceHighlight();
 }
 
+function renderHighlighted(target, text, mode) {
+    target.innerHTML = mode === "diagnostic" ? highlightDiagnostic(text) : highlightLlvm(text);
+}
+
 function renderOutputHighlight(text, mode) {
-    output.innerHTML = mode === "diagnostic" ? highlightDiagnostic(text) : highlightLlvm(text);
+    renderHighlighted(output, text, mode);
+}
+
+function renderRunHighlight(text, mode) {
+    renderHighlighted(runOutput, text, mode);
 }
 
 async function compileNow() {
@@ -714,12 +774,56 @@ async function compileNow() {
     }
 }
 
+async function runQuantNow() {
+    const currentRequest = ++runRequestId;
+    quant.checked = true;
+    runButton.disabled = true;
+    runStatus.textContent = "Running";
+    runStatus.className = "pane-meta";
+
+    try {
+        const response = await fetch("/api/run-quant", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source: source.value }),
+        });
+
+        const payload = await response.json();
+        if (currentRequest !== runRequestId) {
+            return;
+        }
+
+        if (payload.status === "ok") {
+            runOutput.className = "output run-output";
+            renderRunHighlight(payload.output, "llvm");
+            runStatus.textContent = "Completed";
+        } else {
+            runOutput.className = "output error";
+            renderRunHighlight(payload.output, "diagnostic");
+            runStatus.textContent = "Error";
+        }
+    } catch (error) {
+        if (currentRequest !== runRequestId) {
+            return;
+        }
+
+        runOutput.className = "output error";
+        renderRunHighlight(`request failed: ${error}`, "diagnostic");
+        runStatus.textContent = "Request failed";
+    } finally {
+        if (currentRequest === runRequestId) {
+            runButton.disabled = false;
+        }
+    }
+}
+
 function scheduleCompile() {
     clearTimeout(debounce);
     renderSourceHighlight();
     updateLineCount();
     statusLine.textContent = "Edited";
     statusLine.className = "status";
+    runStatus.textContent = "Stale";
     debounce = setTimeout(compileNow, 450);
 }
 
@@ -727,6 +831,10 @@ source.addEventListener("input", scheduleCompile);
 source.addEventListener("scroll", syncSourceHighlight);
 quant.addEventListener("change", compileNow);
 compileButton.addEventListener("click", compileNow);
+runButton.addEventListener("click", () => {
+    compileNow();
+    runQuantNow();
+});
 source.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") {
         return;
@@ -741,6 +849,7 @@ source.addEventListener("keydown", (event) => {
 });
 renderSourceHighlight();
 renderOutputHighlight(output.textContent, output.classList.contains("error") ? "diagnostic" : "llvm");
+renderRunHighlight(runOutput.textContent, runOutput.classList.contains("error") ? "diagnostic" : "llvm");
 updateLineCount();
 "##;
 
@@ -748,6 +857,11 @@ updateLineCount();
 struct CompileRequest {
     source: String,
     quant: bool,
+}
+
+#[derive(Deserialize)]
+struct RunQuantRequest {
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -766,7 +880,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(index))
-        .route("/api/compile", post(compile));
+        .route("/api/compile", post(compile))
+        .route("/api/run-quant", post(run_quant));
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -793,6 +908,18 @@ async fn compile(Json(payload): Json<CompileRequest>) -> Json<CompileResponse> {
     Json(result)
 }
 
+async fn run_quant(Json(payload): Json<RunQuantRequest>) -> Json<CompileResponse> {
+    let source = payload.source;
+    let result = tokio::task::spawn_blocking(move || run_quant_source(&source))
+        .await
+        .unwrap_or_else(|err| CompileResponse {
+            status: "error",
+            output: format!("quantum runner task failed: {err}"),
+        });
+
+    Json(result)
+}
+
 fn compile_source(source: &str, quant: bool) -> CompileResponse {
     if source.trim().is_empty() {
         return CompileResponse {
@@ -810,6 +937,30 @@ fn compile_source(source: &str, quant: bool) -> CompileResponse {
         Ok(output) => CompileResponse {
             status: "ok",
             output,
+        },
+        Err(output) => CompileResponse {
+            status: "error",
+            output,
+        },
+    }
+}
+
+fn run_quant_source(source: &str) -> CompileResponse {
+    if source.trim().is_empty() {
+        return CompileResponse {
+            status: "error",
+            output: "empty source".to_string(),
+        };
+    }
+
+    match compile_to_ll_with(source, Backend::Qir).and_then(|ll| run_qir_ll_to_string(&ll)) {
+        Ok(output) => CompileResponse {
+            status: "ok",
+            output: if output.trim().is_empty() {
+                "program completed without textual output".to_string()
+            } else {
+                output
+            },
         },
         Err(output) => CompileResponse {
             status: "error",
@@ -871,6 +1022,7 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                         <span>"Quant"</span>
                     </label>
                     <button id="compile" class="compile-button" type="button">"Compile"</button>
+                    <button id="run-quant" class="run-button" type="button">"Run Quant"</button>
                 </div>
             </header>
             <section class="workspace">
@@ -891,15 +1043,26 @@ fn AppView(source: String, output: String, is_error: bool) -> impl IntoView {
                         >{source}</textarea>
                     </div>
                 </section>
-                <section class="pane output-pane">
-                    <div class="pane-header">
-                        <span id="output-title" class="pane-title">"LLVM IR"</span>
-                        <span id="output-meta" class="pane-meta">".ll"</span>
-                    </div>
-                    <div class="output-wrap">
-                        <pre id="output" class=output_class>{output}</pre>
-                    </div>
-                </section>
+                <div class="right-stack">
+                    <section class="pane output-pane">
+                        <div class="pane-header">
+                            <span id="output-title" class="pane-title">"LLVM IR"</span>
+                            <span id="output-meta" class="pane-meta">".ll"</span>
+                        </div>
+                        <div class="output-wrap">
+                            <pre id="output" class=output_class>{output}</pre>
+                        </div>
+                    </section>
+                    <section class="pane run-pane">
+                        <div class="pane-header">
+                            <span class="pane-title">"Run output"</span>
+                            <span id="run-status" class="pane-meta">"Idle"</span>
+                        </div>
+                        <div class="output-wrap">
+                            <pre id="run-output" class="output run-output">"Click Run Quant to execute the QIR program."</pre>
+                        </div>
+                    </section>
+                </div>
             </section>
         </main>
     }
@@ -939,6 +1102,8 @@ mod tests {
 
         assert!(page.contains("id=\"source\""), "{page}");
         assert!(page.contains("id=\"output\""), "{page}");
+        assert!(page.contains("id=\"run-output\""), "{page}");
+        assert!(page.contains("id=\"run-quant\""), "{page}");
         assert!(page.contains("id=\"quant\""), "{page}");
         assert!(page.contains("LLVM IR"), "{page}");
     }
@@ -950,6 +1115,50 @@ mod tests {
         assert_eq!(response.status, "ok");
         assert!(
             response.output.contains("generated by nialang"),
+            "{}",
+            response.output
+        );
+    }
+
+    #[test]
+    fn run_quant_source_returns_error_for_invalid_program() {
+        let response = run_quant_source("fn main() i32 { true }");
+
+        assert_eq!(response.status, "error");
+        assert!(
+            response.output.contains("type error") || response.output.contains("semantic error"),
+            "{}",
+            response.output
+        );
+    }
+
+    #[test]
+    fn run_quant_source_executes_quantum_program() {
+        let response = run_quant_source(DEFAULT_QUANT_SOURCE);
+
+        assert_eq!(response.status, "ok", "{}", response.output);
+        assert!(!response.output.trim().is_empty(), "{}", response.output);
+    }
+
+    #[test]
+    fn run_quant_source_reports_qft4_resources() {
+        let response = run_quant_source(QFT4_SOURCE);
+
+        assert_eq!(response.status, "ok", "{}", response.output);
+        assert!(
+            response.output.contains("METADATA\trequired_num_qubits\t4"),
+            "{}",
+            response.output
+        );
+        assert!(
+            response
+                .output
+                .contains("METADATA\trequired_num_results\t4"),
+            "{}",
+            response.output
+        );
+        assert!(
+            response.output.contains("OUTPUT\tRESULT"),
             "{}",
             response.output
         );
