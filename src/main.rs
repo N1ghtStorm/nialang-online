@@ -33,33 +33,33 @@ const QFT4_SOURCE: &str = include_str!("../../nialang/examples/quantum/qft4.nia"
 const STYLE: &str = r#"
 :root {
     color-scheme: dark;
-    --bg: #0c0f14;
-    --topbar: #111720;
-    --panel: #151a22;
-    --panel-strong: #1b2330;
-    --editor: #0f141b;
-    --border: #2b3544;
-    --border-soft: #202936;
-    --text: #f5f7fb;
-    --muted: #9aa8ba;
-    --muted-strong: #c4ccd8;
-    --accent: #55d6be;
-    --accent-strong: #7dd3fc;
-    --accent-ink: #031317;
-    --warning: #f9c76b;
-    --danger: #ff8f9c;
-    --danger-bg: #26161d;
-    --shadow: 0 24px 80px rgb(0 0 0 / 0.35);
-    --atom-bg: #282c34;
-    --atom-fg: #abb2bf;
-    --atom-comment: #5c6370;
-    --atom-red: #e06c75;
-    --atom-orange: #d19a66;
-    --atom-yellow: #e5c07b;
-    --atom-green: #98c379;
-    --atom-cyan: #56b6c2;
-    --atom-blue: #61afef;
-    --atom-purple: #c678dd;
+    --bg: #09051a;
+    --topbar: #150d35;
+    --panel: #191033;
+    --panel-strong: #21164a;
+    --editor: #0f0a24;
+    --border: #40316d;
+    --border-soft: #2d2451;
+    --text: #f5efff;
+    --muted: #a89bc8;
+    --muted-strong: #d3c7f4;
+    --accent: #b88cff;
+    --accent-strong: #d8b4ff;
+    --accent-ink: #13051d;
+    --warning: #a9b7ff;
+    --danger: #ff8bc1;
+    --danger-bg: #2a1028;
+    --shadow: 0 24px 90px rgb(11 5 31 / 0.58);
+    --atom-bg: #100b24;
+    --atom-fg: #d9d2ee;
+    --atom-comment: #786f9e;
+    --atom-red: #ff7aad;
+    --atom-orange: #dca170;
+    --atom-yellow: #e8cf93;
+    --atom-green: #9ee6d3;
+    --atom-cyan: #9ccfff;
+    --atom-blue: #91a7ff;
+    --atom-purple: #c994ff;
     --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, Consolas, monospace;
     --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -87,7 +87,8 @@ body {
     height: 100vh;
     overflow: hidden;
     background:
-        linear-gradient(180deg, #121821 0%, #0c0f14 34%),
+        linear-gradient(180deg, rgb(53 30 112 / 0.92) 0%, rgb(24 12 58 / 0.97) 36%, #09051a 100%),
+        linear-gradient(120deg, #070413 0%, #1c1245 55%, #3d217d 100%),
         var(--bg);
 }
 
@@ -99,8 +100,8 @@ body {
     min-height: 64px;
     padding: 0 20px;
     border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--topbar) 94%, white 6%);
-    box-shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset;
+    background: color-mix(in srgb, var(--topbar) 92%, #5b35b3 8%);
+    box-shadow: 0 1px 0 rgb(239 221 255 / 0.08) inset;
 }
 
 .brand {
@@ -117,14 +118,14 @@ body {
     place-items: center;
     width: 34px;
     height: 34px;
-    border: 1px solid #3a6570;
+    border: 1px solid #7760ba;
     border-radius: 8px;
-    background: linear-gradient(145deg, #1d3340, #14212b);
-    color: var(--accent);
+    background: linear-gradient(145deg, #3b2472, #170d37);
+    color: var(--accent-strong);
     font-family: var(--mono);
     font-size: 16px;
     line-height: 1;
-    box-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
+    box-shadow: 0 10px 30px rgb(34 16 84 / 0.46);
 }
 
 .toolbar {
@@ -157,7 +158,7 @@ body {
     padding: 0 10px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #151c26;
+    background: #1d143d;
     color: var(--muted-strong);
     font-size: 13px;
     font-weight: 650;
@@ -167,7 +168,7 @@ body {
 
 .quant-toggle:focus-within {
     border-color: var(--accent-strong);
-    box-shadow: 0 0 0 3px rgb(125 211 252 / 0.14);
+    box-shadow: 0 0 0 3px rgb(184 140 255 / 0.18);
 }
 
 .quant-checkbox {
@@ -180,25 +181,25 @@ body {
 .compile-button {
     min-height: 34px;
     padding: 0 16px;
-    border: 1px solid #8debd4;
+    border: 1px solid #e2c7ff;
     border-radius: 8px;
-    background: linear-gradient(180deg, #8fead7, #55d6be);
+    background: linear-gradient(180deg, #dfc4ff, #a875ff);
     color: var(--accent-ink);
     font: 700 14px var(--sans);
     cursor: pointer;
-    box-shadow: 0 10px 28px rgb(85 214 190 / 0.16);
+    box-shadow: 0 10px 30px rgb(168 117 255 / 0.24);
 }
 
 .run-button {
     min-height: 34px;
     padding: 0 16px;
-    border: 1px solid #f4d28a;
+    border: 1px solid #c9d5ff;
     border-radius: 8px;
-    background: linear-gradient(180deg, #f6d98f, #e5b85e);
-    color: #1b1204;
+    background: linear-gradient(180deg, #c7d3ff, #899dff);
+    color: #0d1230;
     font: 700 14px var(--sans);
     cursor: pointer;
-    box-shadow: 0 10px 28px rgb(229 184 94 / 0.14);
+    box-shadow: 0 10px 30px rgb(137 157 255 / 0.18);
 }
 
 .compile-button:disabled,
@@ -229,7 +230,7 @@ body {
 }
 
 .pane.output-pane {
-    border-color: #314055;
+    border-color: #4d3b80;
 }
 
 .right-stack {
@@ -242,7 +243,7 @@ body {
 }
 
 .pane.run-pane {
-    border-color: #3d3449;
+    border-color: #5b468b;
 }
 
 .pane-header {
@@ -258,7 +259,7 @@ body {
 
 .pane-title {
     overflow: hidden;
-    color: #d9dee5;
+    color: #e9e1ff;
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -278,7 +279,7 @@ body {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--atom-bg);
+    background: var(--editor);
 }
 
 .editor-wrap {
@@ -295,7 +296,7 @@ body {
     padding: 16px;
     border: 0;
     outline: 0;
-    background: var(--atom-bg);
+    background: var(--editor);
     color: var(--atom-fg);
     font: 14px/1.55 var(--mono);
     tab-size: 4;
@@ -322,12 +323,12 @@ body {
     background: transparent;
     color: transparent;
     caret-color: var(--accent);
-    scrollbar-color: #3e5067 var(--atom-bg);
+    scrollbar-color: #675596 var(--editor);
     -webkit-text-fill-color: transparent;
 }
 
 .editor::selection {
-    background: rgb(97 175 239 / 0.32);
+    background: rgb(184 140 255 / 0.34);
     color: transparent;
 }
 
@@ -335,12 +336,12 @@ body {
     display: block;
     overflow: auto;
     overscroll-behavior: contain;
-    scrollbar-color: #3e5067 var(--atom-bg);
+    scrollbar-color: #675596 var(--editor);
 }
 
 .output.error {
     background: var(--danger-bg);
-    color: #ffd6d6;
+    color: #ffd4ea;
 }
 
 .run-output {
